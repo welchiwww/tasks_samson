@@ -80,7 +80,43 @@ function importXml(string $a) : void{
         $stmt = $connection->prepare("INSERT INTO a_product (code, name) VALUES (?, ?)");
         $stmt->bind_param("ss", $code, $name);
         $stmt->execute();
+        $productId = $connection->insert_id;
 
+        foreach ($product->Цена as $price) {
+            $priceType = $price['Тип'];
+            $priceValue = (float)$price;
+            $stmt = $connection->prepare("INSERT INTO a_price (product_id, price_type, price) VALUES (?, ?, ?)");
+            $stmt->bind_param("isd", $productId, $priceType, $priceValue);
+            $stmt->execute();
+        }
+
+        foreach ($product->Свойства->children() as $propertyName => $propertyValue) {
+            $propertyValue = (string)$propertyValue;
+            $stmt = $connection->prepare("INSERT INTO a_property (product_id, property_name, property_value) VALUES (?, ?, ?)");
+            $stmt->bind_param("iss", $productId, $propertyName, $propertyValue);
+            $stmt->execute();
+        }
+
+        foreach ($product->Разделы->Раздел as $category) {
+            $categoryName = (string)$category;
+            
+            $stmt = $connection->prepare("SELECT id FROM a_category WHERE name = ?");
+            $stmt->bind_param("s", $categoryName);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result->num_rows == 0) {
+                $stmt = $connection->prepare("INSERT INTO a_category (name) VALUES (?)");
+                $stmt->bind_param("s", $categoryName);
+                $stmt->execute();
+                $categoryId = $connection->insert_id;
+            } else {
+                $row = $result->fetch_assoc();
+                $categoryId = $row['id'];
+            } 
+            $stmt = $connection->prepare("INSERT INTO a_product_category (product_id, category_id) VALUES (?, ?)");
+            $stmt->bind_param("ii", $productId, $categoryId);
+            $stmt->execute();
+        }
     }
 }
 
