@@ -7,6 +7,8 @@
 то во втором месте заменить подстроку $b на инвертированную подстроку.
 */
 
+include "./db.php";
+
 function convertString(string &$a, string $b) : void {
     $count = substr_count($a, $b);
     
@@ -67,7 +69,23 @@ $a – путь к xml файлу (структура файла приведе�
 Результат ее выполнения: прочитать файл $a и импортировать его в созданную БД.
 */
 
-function importXml(string $a) : void{ }
+function importXml(string $a) : void{ 
+    global $connection;
+    $xml = simplexml_load_file($a);
+
+    foreach ($xml->Товар as $product) {
+        $code = $product['Код'];
+        $name = $product['Название'];
+
+        $stmt = $connection->prepare("INSERT INTO a_product (code, name) VALUES (?, ?)");
+        $stmt->bind_param("ss", $code, $name);
+        $stmt->execute();
+
+    }
+}
+
+$a = __DIR__ . "data.xml";
+importXml($a);
 
 /*
 Реализовать функцию exportXml($a, $b). 
