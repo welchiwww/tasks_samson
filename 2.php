@@ -54,7 +54,7 @@ function mySortForKey(array &$a, $b): void
 
 /*
 $a = [
-    ['a' => 1, 'b' => 3, 'e' => 5, 's' => 10.0],
+    ['a' => 1, 'b' => 3, 'c' => 5, 's' => 10.0],
     ['a' => 4, 'b' => 6, 'c' => 8, 's' => 40.0],
     ['a' => 5, 'b' => 6, 'c' => 7, 's' => 38.5],
     ['a' => 6, 'b' => 4, 'c' => 2, 's' => 10.0]
@@ -164,7 +164,7 @@ $b – код рубрики.
 выходящие в рубрику $b или в любую из всех вложенных в нее рубрик, сохранить результат в файл $a.
 */
 
-function exportXml($a, $b) {
+function exportXml(string $a, string $b) : void {
     global $connection;
     $xml = new SimpleXMLElement('<?xml version="1.0" encoding="UTF-8"?><Товары></Товары>');
     
