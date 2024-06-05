@@ -9,26 +9,34 @@
 
 include "./db.php";
 
-function convertString(string &$a, string $b): void
+function mb_strrev(string $string): string
 {
-    $count = substr_count($a, $b);
-
-    if ($count >= 2) {
-        $first_entry = strpos($a, $b);
-        $second_entry = strpos($a, $b, $first_entry + strlen($b));
-        $reversed_second = strrev($b);
-        $a = substr_replace($a, $reversed_second, $second_entry, strlen($b));
-    } else {
-        throw new Exception("Строка содержит менее 2 подстрок '{$b}'");
+    $reversed = '';
+    for ($i = mb_strlen($string) - 1; $i >= 0; $i--) {
+        $reversed .= mb_substr($string, $i, 1);
     }
+    return $reversed;
+}
+
+function convertString(string $a, string $b): string
+{
+    $count = mb_substr_count($a, $b);
+    $result = '';
+    if ($count >= 2) {
+        $first_entry = mb_strpos($a, $b);
+        $second_entry = mb_strpos($a, $b, $first_entry + mb_strlen($b));
+        $reversed_second = mb_strrev($b);
+        $a = mb_substr($a, 0, $second_entry) . $reversed_second . mb_substr($a, $second_entry + mb_strlen($b));
+        $result = $a;
+    }
+    return $result;
 }
 
 /*
-$a = 'abcabcabc bac abc abc cbd abc';
-convertString($a, 'abc');
-print_r($a);
+$a = 'абвcbd cbd абв вда вба дад';
+$b = convertString($a, 'абв'); //$b = 'абвcbd cbd бва вда вба дад'
+print_r($b);
 */
-// 'abccbdabc bac abc abc cbd abc'
 
 /*
 Реализовать функцию mySortForKey($a, $b). 
@@ -39,7 +47,7 @@ $b – ключ вложенного массива.
 выбросить ошибку класса Exception с индексом неправильного массива.
 */
 
-function mySortForKey(array &$a, $b): void
+function mySortForKey(array $a, string $b): array
 {
     foreach ($a as $index => $inner_arr) {
         if (!array_key_exists($b, $inner_arr)) {
@@ -50,19 +58,24 @@ function mySortForKey(array &$a, $b): void
     usort($a, function ($x, $y) use ($b) {
         return $x[$b] <=> $y[$b];
     });
+
+    return $a;
 }
 
 /*
 $a = [
-    ['a' => 1, 'b' => 3, 'c' => 5, 's' => 10.0],
-    ['a' => 4, 'b' => 6, 'c' => 8, 's' => 40.0],
-    ['a' => 5, 'b' => 6, 'c' => 7, 's' => 38.5],
-    ['a' => 6, 'b' => 4, 'c' => 2, 's' => 10.0]
+    ['a' => 1, 'b' => 3, 'c' => 5, 's' => 10.0, 3],
+    ['a' => 4, 'b' => 6, 'c' => 8, 's' => 40.0, 4],
+    ['a' => 5, 'b' => 6, 'c' => 7, 's' => 38.5, 1],
+    ['a' => 6, 'b' => 4, 'c' => 2, 's' => 10.0, 2]
 ];
 
-mySortForKey($a, 'c');
-print_r($a);
+$b = mySortForKey($a, '0');
+$c = mySortForKey($a, 'c');
+print_r($b);
+print_r($c);
 */
+
 
 /*
 Реализовать функцию importXml($a). 
@@ -70,90 +83,109 @@ $a – путь к xml файлу (структура файла приведе�
 Результат ее выполнения: прочитать файл $a и импортировать его в созданную БД.
 */
 
+//Вставка категории с проверкой на существование
+function insertCategory(string $categoryName, int $parentId = null): int
+{
+    global $connection;
+    $stmt = $connection->prepare(
+        "SELECT id 
+    FROM a_category
+    WHERE name = ?"
+    );
+    $stmt->bind_param("s", $categoryName);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row["id"];
+    } else {
+        $stmt = $connection->prepare(
+            "INSERT INTO a_category(name, parent_id)
+        VALUES
+        (?, ?)"
+        );
+        $stmt->bind_param("si", $categoryName, $parentId);
+        $stmt->execute();
+        $result = $stmt->insert_id;
+        return $result;
+    }
+}
 
 function importXml(string $a): void
 {
     global $connection;
-    $file = file_get_contents($a);
-    $pattern = '/<\?xml version="1.0" encoding="Windows-1251"\?>/i';
-    $replacement = '<?xml version="1.0"?>';
+    $parent_global_id = null;
+    $dom = new DOMDocument();
+    $dom->load($a);
 
-    $file = preg_replace($pattern, $replacement, $file);
+    $products = $dom->getElementsByTagName('Товар');
 
-    $xml = simplexml_load_string($file);
-
-    if ($xml === false) {
-        throw new Exception("Ошибка при загрузке XML файла");
-    }
-    foreach ($xml->Товар as $product) {
-        $code = $product['Код'];
-        $name = $product['Название'];
-        $stmt = $connection->prepare("INSERT INTO a_product (code, name) VALUES (?, ?)");
-        $stmt->bind_param("ss", $code, $name);
+    foreach ($products as $product) {
+        $code = $product->getAttribute('Код');
+        $name = $product->getAttribute('Название');
+        $stmt = $connection->prepare(
+            "INSERT INTO a_product (code, name) 
+        VALUES 
+        (?, ?)"
+        );
+        $stmt->bind_param("is", $code, $name);
         $stmt->execute();
-        $productId = $connection->insert_id;
+        $product_id = $stmt->insert_id;
 
-        foreach ($product->Цена as $price) {
-            $priceType = $price['Тип'];
-            $priceValue = (float) $price;
-            $stmt = $connection->prepare("INSERT INTO a_price (product_id, price_type, price) VALUES (?, ?, ?)");
-            $stmt->bind_param("isd", $productId, $priceType, $priceValue);
+        $prices = $product->getElementsByTagName('Цена');
+        foreach ($prices as $price) {
+            $priceType = $price->getAttribute('Тип');
+            $priceValue = $price->nodeValue;
+            $stmt = $connection->prepare(
+                "INSERT INTO a_price(product_id, price_type, price) 
+            VALUES 
+            (?, ?, ?)"
+            );
+            $stmt->bind_param("iss", $product_id, $priceType, $priceValue);
             $stmt->execute();
         }
 
-        foreach ($product->Свойства->children() as $propertyName => $propertyValue) {
-            $propertyValue = (string) $propertyValue;
-            $unit = isset($propertyValue['ЕдИзм']) ? (string) $propertyValue['ЕдИзм'] : null;
-            $stmt = $connection->prepare("INSERT INTO a_property (product_id, property_name, property_value, unit) VALUES (?, ?, ?, ?)");
-            $stmt->bind_param("isss", $productId, $propertyName, $propertyValue, $unit);
-            $stmt->execute();
-        }
+        $properties = $product->getElementsByTagName('Свойства')->item(0)->childNodes;
+        foreach ($properties as $property) {
+            if ($property instanceof DOMElement) {
+                $propertyName = $property->nodeName;
+                $propertyValue = $property->nodeValue;
+                $unit = $property->hasAttribute('ЕдИзм') ? $property->getAttribute('ЕдИзм') : null;
 
-        foreach ($product->Разделы->Раздел as $category) {
-            $categoryName = (string) $category;
-            $categoryCode = (string) $category['Код'];
-            $parentCode = isset($category['Родитель']) ? (string) $category['Родитель'] : null;
-
-            if ($parentCode) {
-                $stmt = $connection->prepare("SELECT id FROM a_category WHERE code = ?");
-                $stmt->bind_Param("s", $parentCode);
+                $stmt = $connection->prepare(
+                    "INSERT INTO a_property(product_id, property_name, property_value, unit)
+                VALUES
+                (?, ?, ?, ?)"
+                );
+                $stmt->bind_param("isss", $product_id, $propertyName, $propertyValue, $unit);
                 $stmt->execute();
-                $result = $stmt->get_result();
-                if ($result->num_rows > 0) {
-                    $row = $result->fetch_assoc();
-                    $parentId = $row['id'];
-                } else {
-                    $parentId = null;
-                }
-            } else {
-                $parentId = null;
             }
-
-            $stmt = $connection->prepare("SELECT id FROM a_category WHERE code = ? AND name = ?");
-            $stmt->bind_param("ss", $categoryCode, $categoryName);
-            $stmt->execute();
-            $result = $stmt->get_result();
-
-            if ($result->num_rows == 0) {
-                $stmt = $connection->prepare("INSERT INTO a_category (code, name, parent_id) VALUES (?, ?, ?)");
-                $stmt->bind_param("ssi", $categoryCode, $categoryName, $parentId);
-                $stmt->execute();
-                $categoryId = $connection->insert_id;
-            } else {
-                $row = $result->fetch_assoc();
-                $categoryId = $row['id'];
-            }
-
-            $stmt = $connection->prepare("INSERT INTO a_product_category (product_id, category_id) VALUES (?, ?)");
-            $stmt->bind_param("ii", $productId, $categoryId);
-            $stmt->execute();
         }
+
+        $categories = $product->getElementsByTagName('Разделы')->item(0)->childNodes;
+        foreach ($categories as $category) {
+            if ($category instanceof DOMElement) {
+                $categoryName = $category->nodeValue;
+                $parent_global_id = insertCategory($categoryName, $parent_global_id);
+                $stmt = $connection->prepare(
+                    "INSERT INTO a_product_category(product_id, category_id)
+                VALUES
+                (?, ?)"
+                );
+                $stmt->bind_param("ii", $product_id, $parent_global_id);
+                $stmt->execute();
+            }
+        }
+        $parent_global_id = null;
     }
 }
 
-
-//$a = __DIR__ . "\data.xml";
-//importXml($a);
+/*
+//В репозитории лежит файл datatest.xml использовал для проверки вложенных рубрик, добавил там фотобумагу и ручной принтер
+$a = __DIR__ . "\data1251.xml";
+importXml($a);
+*/
 
 /*
 Реализовать функцию exportXml($a, $b). 
@@ -164,83 +196,98 @@ $b – код рубрики.
 выходящие в рубрику $b или в любую из всех вложенных в нее рубрик, сохранить результат в файл $a.
 */
 
-function exportXml(string $a, string $b) : void {
+function exportXml(string $a, string $b)
+{
     global $connection;
-    $xml = new SimpleXMLElement('<?xml version="1.0" encoding="UTF-8"?><Товары></Товары>');
-    
-    $sql = "SELECT 
-                p.id AS product_id, 
-                p.code, 
-                p.name AS product_name,
-                GROUP_CONCAT(DISTINCT pr.price_type, ':', pr.price) AS prices,
-                GROUP_CONCAT(DISTINCT ap.property_name, ':', ap.property_value) AS properties
-            FROM 
-                a_product p
-            JOIN 
-                a_product_category pc ON p.id = pc.product_id
-            JOIN 
-                a_category c ON pc.category_id = c.id
-            JOIN 
-                a_price pr ON p.id = pr.product_id
-            JOIN 
-                a_property ap ON p.id = ap.product_id
-            WHERE 
-                c.id IN (
-                    SELECT 
-                        id
-                    FROM 
-                        (
-                            SELECT 
-                                id
-                            FROM 
-                                a_category
-                            WHERE 
-                                code = '$b'
-                            UNION ALL
-                            SELECT 
-                                c.id
-                            FROM 
-                                a_category c
-                            JOIN 
-                                (
-                                    SELECT 
-                                        id
-                                    FROM 
-                                        a_category
-                                    WHERE 
-                                        code = '$b'
-                                ) AS ct ON c.parent_id = ct.id
-                        ) AS all_categories
-                )
-            GROUP BY
-                p.id, p.code, p.name
-            ORDER BY 
-                p.id";
-                
-    $result = $connection->query($sql);
-    
+    $stmt = $connection->prepare(
+    "SELECT 
+        p.id, 
+        p.code, 
+        p.name,
+        GROUP_CONCAT(DISTINCT CONCAT(pr.property_name, ': ', pr.property_value, IF(pr.unit IS NOT NULL, CONCAT(' ', pr.unit), '')) SEPARATOR ', ') AS properties,
+        GROUP_CONCAT(DISTINCT CONCAT(prc.price_type, ': ', prc.price) SEPARATOR ', ') AS prices,
+        GROUP_CONCAT(DISTINCT c.name SEPARATOR ', ') AS categories
+    FROM 
+        a_product p
+    JOIN 
+        a_product_category pc ON p.id = pc.product_id
+    JOIN 
+        a_category c ON pc.category_id = c.id
+    JOIN (
+        SELECT id FROM a_category WHERE id = ?
+        UNION ALL
+        SELECT c.id FROM a_category c JOIN a_category parent ON c.parent_id = parent.id WHERE parent.id = ?
+    ) AS subcategories ON pc.category_id = subcategories.id
+    LEFT JOIN 
+        a_property pr ON p.id = pr.product_id
+    LEFT JOIN 
+        a_price prc ON p.id = prc.product_id
+    GROUP BY 
+        p.id, p.code, p.name;
+    "
+    );
+
+    $stmt->bind_param("ii", $b, $b);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $dom = new DOMDocument('1.0', 'utf-8');
+    //$dom = new DOMDocument('1.0', 'Windows-1251');
+    $dom->formatOutput = true;
+
+    $root = $dom->createElement('Товары');
+    $dom->appendChild($root);
+
     while ($row = $result->fetch_assoc()) {
-        $product = $xml->addChild('Товар');
-        $product->addAttribute('Код', $row['code']);
-        $product->addAttribute('Название', $row['product_name']);
-        
-        $prices = explode(',', $row['prices']);
-        foreach ($prices as $price) {
-            list($type, $value) = explode(':', $price);
-            $priceElement = $product->addChild('Цена', $value);
-            $priceElement->addAttribute('Тип', $type);
+        $product = $dom->createElement('Товар');
+        $product->setAttribute('Код', $row['code']);
+        $product->setAttribute('Название', htmlspecialchars($row['name']));
+        $root->appendChild($product);
+
+        if ($row['prices']) {
+            $prices = explode(', ', $row['prices']);
+            foreach ($prices as $price) {
+                list($priceType, $priceValue) = explode(': ', $price);
+                $priceElement = $dom->createElement('Цена', htmlspecialchars($priceValue));
+                $priceElement->setAttribute('Тип', htmlspecialchars($priceType));
+                $product->appendChild($priceElement);
+            }
         }
-        
-        $properties = explode(',', $row['properties']);
-        $propertiesElement = $product->addChild('Свойства');
-        foreach ($properties as $property) {
-            list($name, $value) = explode(':', $property);
-            $propertiesElement->addChild($name, $value);
+
+        if ($row['properties']) {
+            $propertiesElement = $dom->createElement('Свойства');
+            $properties = explode(', ', $row['properties']);
+            foreach ($properties as $property) {
+                list($propertyName, $propertyValue) = explode(': ', $property, 2);
+                if (strpos($propertyValue, ' ') !== false) {
+                    list($propertyValue, $unit) = explode(' ', $propertyValue, 2);
+                    $propertyElement = $dom->createElement(htmlspecialchars($propertyName), htmlspecialchars($propertyValue));
+                    $propertyElement->setAttribute('ЕдИзм', htmlspecialchars($unit));
+                } else {
+                    $propertyElement = $dom->createElement(htmlspecialchars($propertyName), htmlspecialchars($propertyValue));
+                }
+                $propertiesElement->appendChild($propertyElement);
+            }
+            $product->appendChild($propertiesElement);
+        }
+
+        if ($row['categories']) {
+            $categoriesElement = $dom->createElement('Разделы');
+            $categories = explode(', ', $row['categories']);
+            foreach ($categories as $category) {
+                $categoryElement = $dom->createElement('Раздел', htmlspecialchars($category));
+                $categoriesElement->appendChild($categoryElement);
+            }
+            $product->appendChild($categoriesElement);
         }
     }
-    
-    $xml->asXML($a);
+
+    $dom->save($a);
 }
 
+/*
+1 - раздел бумага
+2 - раздел принтеры
+3 - раздел МФУ, предок от раздела 2
+*/
 
-exportXml( __DIR__ . "/export23.xml", "20");
+//exportXml("./export1251.xml", "2");
