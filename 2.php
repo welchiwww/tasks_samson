@@ -29,12 +29,12 @@ function convertString(string $a, string $b): string
         $a = mb_substr($a, 0, $second_entry) . $reversed_second . mb_substr($a, $second_entry + mb_strlen($b));
         $result = $a;
     }
-    return $result;
+    return $a;
 }
 
 /*
 $a = 'абвcbd cbd абв вда вба дад';
-$b = convertString($a, 'абв'); //$b = 'абвcbd cbd бва вда вба дад'
+$b = convertString('one two three', 'four'); 
 print_r($b);
 */
 
@@ -125,6 +125,19 @@ function importXml(string $a): void
         $code = $product->getAttribute('Код');
         $name = $product->getAttribute('Название');
         $stmt = $connection->prepare(
+            "SELECT code, name 
+            FROM a_product 
+            WHERE code = ?"
+        );
+        $stmt->bind_param("i", $code);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($result->num_rows > 0) {
+            echo "В данной БД уже существует товар с кодом {$code} под названием {$name}";
+            continue;
+        }
+
+        $stmt = $connection->prepare(
             "INSERT INTO a_product (code, name) 
         VALUES 
         (?, ?)"
@@ -183,7 +196,7 @@ function importXml(string $a): void
 
 /*
 //В репозитории лежит файл datatest.xml использовал для проверки вложенных рубрик, добавил там фотобумагу и ручной принтер
-$a = __DIR__ . "\data1251.xml";
+$a = __DIR__ . "\data.xml";
 importXml($a);
 */
 
@@ -196,98 +209,126 @@ $b – код рубрики.
 выходящие в рубрику $b или в любую из всех вложенных в нее рубрик, сохранить результат в файл $a.
 */
 
-function exportXml(string $a, string $b)
-{
+function exportLogic(string $a, int $code) : void{
     global $connection;
     $stmt = $connection->prepare(
-    "SELECT 
-        p.id, 
-        p.code, 
-        p.name,
-        GROUP_CONCAT(DISTINCT CONCAT(pr.property_name, ': ', pr.property_value, IF(pr.unit IS NOT NULL, CONCAT(' ', pr.unit), '')) SEPARATOR ', ') AS properties,
-        GROUP_CONCAT(DISTINCT CONCAT(prc.price_type, ': ', prc.price) SEPARATOR ', ') AS prices,
-        GROUP_CONCAT(DISTINCT c.name SEPARATOR ', ') AS categories
-    FROM 
-        a_product p
-    JOIN 
-        a_product_category pc ON p.id = pc.product_id
-    JOIN 
-        a_category c ON pc.category_id = c.id
-    JOIN (
-        SELECT id FROM a_category WHERE id = ?
-        UNION ALL
-        SELECT c.id FROM a_category c JOIN a_category parent ON c.parent_id = parent.id WHERE parent.id = ?
-    ) AS subcategories ON pc.category_id = subcategories.id
-    LEFT JOIN 
-        a_property pr ON p.id = pr.product_id
-    LEFT JOIN 
-        a_price prc ON p.id = prc.product_id
-    GROUP BY 
-        p.id, p.code, p.name;
-    "
-    );
-
-    $stmt->bind_param("ii", $b, $b);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $dom = new DOMDocument('1.0', 'utf-8');
-    //$dom = new DOMDocument('1.0', 'Windows-1251');
-    $dom->formatOutput = true;
-
-    $root = $dom->createElement('Товары');
-    $dom->appendChild($root);
-
-    while ($row = $result->fetch_assoc()) {
-        $product = $dom->createElement('Товар');
-        $product->setAttribute('Код', $row['code']);
-        $product->setAttribute('Название', htmlspecialchars($row['name']));
-        $root->appendChild($product);
-
-        if ($row['prices']) {
-            $prices = explode(', ', $row['prices']);
-            foreach ($prices as $price) {
-                list($priceType, $priceValue) = explode(': ', $price);
-                $priceElement = $dom->createElement('Цена', htmlspecialchars($priceValue));
-                $priceElement->setAttribute('Тип', htmlspecialchars($priceType));
-                $product->appendChild($priceElement);
-            }
-        }
-
-        if ($row['properties']) {
-            $propertiesElement = $dom->createElement('Свойства');
-            $properties = explode(', ', $row['properties']);
-            foreach ($properties as $property) {
-                list($propertyName, $propertyValue) = explode(': ', $property, 2);
-                if (strpos($propertyValue, ' ') !== false) {
-                    list($propertyValue, $unit) = explode(' ', $propertyValue, 2);
-                    $propertyElement = $dom->createElement(htmlspecialchars($propertyName), htmlspecialchars($propertyValue));
-                    $propertyElement->setAttribute('ЕдИзм', htmlspecialchars($unit));
-                } else {
-                    $propertyElement = $dom->createElement(htmlspecialchars($propertyName), htmlspecialchars($propertyValue));
+        "SELECT 
+            p.id, 
+            p.code, 
+            p.name,
+            GROUP_CONCAT(DISTINCT CONCAT(pr.property_name, ': ', pr.property_value, IF(pr.unit IS NOT NULL, CONCAT(' ', pr.unit), '')) SEPARATOR ', ') AS properties,
+            GROUP_CONCAT(DISTINCT CONCAT(prc.price_type, ': ', prc.price) SEPARATOR ', ') AS prices,
+            GROUP_CONCAT(DISTINCT c.name SEPARATOR ', ') AS categories
+        FROM 
+            a_product p
+        JOIN 
+            a_product_category pc ON p.id = pc.product_id
+        JOIN 
+            a_category c ON pc.category_id = c.id
+        JOIN (
+            SELECT id FROM a_category WHERE id = ?
+            UNION ALL
+            SELECT c.id FROM a_category c JOIN a_category parent ON c.parent_id = parent.id WHERE parent.id = ?
+        ) AS subcategories ON pc.category_id = subcategories.id
+        LEFT JOIN 
+            a_property pr ON p.id = pr.product_id
+        LEFT JOIN 
+            a_price prc ON p.id = prc.product_id
+        GROUP BY 
+            p.id, p.code, p.name;
+        "
+        );
+    
+        $stmt->bind_param("ii", $code, $code);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $dom = new DOMDocument('1.0', 'utf-8');
+        //$dom = new DOMDocument('1.0', 'Windows-1251');
+        $dom->formatOutput = true;
+    
+        $root = $dom->createElement('Товары');
+        $dom->appendChild($root);
+    
+        while ($row = $result->fetch_assoc()) {
+            $product = $dom->createElement('Товар');
+            $product->setAttribute('Код', $row['code']);
+            $product->setAttribute('Название', htmlspecialchars($row['name']));
+            $root->appendChild($product);
+    
+            if ($row['prices']) {
+                $prices = explode(', ', $row['prices']);
+                foreach ($prices as $price) {
+                    list($priceType, $priceValue) = explode(': ', $price);
+                    $priceElement = $dom->createElement('Цена', htmlspecialchars($priceValue));
+                    $priceElement->setAttribute('Тип', htmlspecialchars($priceType));
+                    $product->appendChild($priceElement);
                 }
-                $propertiesElement->appendChild($propertyElement);
             }
-            $product->appendChild($propertiesElement);
-        }
-
-        if ($row['categories']) {
-            $categoriesElement = $dom->createElement('Разделы');
-            $categories = explode(', ', $row['categories']);
-            foreach ($categories as $category) {
-                $categoryElement = $dom->createElement('Раздел', htmlspecialchars($category));
-                $categoriesElement->appendChild($categoryElement);
+    
+            if ($row['properties']) {
+                $propertiesElement = $dom->createElement('Свойства');
+                $properties = explode(', ', $row['properties']);
+                foreach ($properties as $property) {
+                    list($propertyName, $propertyValue) = explode(': ', $property, 2);
+                    if (strpos($propertyValue, ' ') !== false) {
+                        list($propertyValue, $unit) = explode(' ', $propertyValue, 2);
+                        $propertyElement = $dom->createElement(htmlspecialchars($propertyName), htmlspecialchars($propertyValue));
+                        $propertyElement->setAttribute('ЕдИзм', htmlspecialchars($unit));
+                    } else {
+                        $propertyElement = $dom->createElement(htmlspecialchars($propertyName), htmlspecialchars($propertyValue));
+                    }
+                    $propertiesElement->appendChild($propertyElement);
+                }
+                $product->appendChild($propertiesElement);
             }
-            $product->appendChild($categoriesElement);
+    
+            if ($row['categories']) {
+                $categoriesElement = $dom->createElement('Разделы');
+                $categories = explode(', ', $row['categories']);
+                foreach ($categories as $category) {
+                    $categoryElement = $dom->createElement('Раздел', htmlspecialchars($category));
+                    $categoriesElement->appendChild($categoryElement);
+                }
+                $product->appendChild($categoriesElement);
+            }
         }
-    }
-
-    $dom->save($a);
+    
+        $dom->save($a);
 }
 
-/*
-1 - раздел бумага
-2 - раздел принтеры
-3 - раздел МФУ, предок от раздела 2
-*/
 
-//exportXml("./export1251.xml", "2");
+function exportXml(string $a, string|int $b)
+{
+    global $connection;
+    $code = null;
+    if (is_string($b)){
+        $stmt = $connection->prepare(
+            "SELECT id 
+            FROM a_category 
+            WHERE name = ?"
+            );
+        $stmt->bind_param("s", $b);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if($result->num_rows > 0){
+            $row = $result->fetch_assoc();
+            $code = $row["id"];
+            exportLogic($a, $code);
+        }
+        else{
+            echo "Категории с именем {$b} не существует.";
+            die();
+        }
+    }
+    elseif(is_int($b)){
+        $code = $b;
+        exportLogic($a, $code);
+
+    }
+    else{
+        echo "Категории с кодом {$b} не существует";
+    }
+
+}
+
+exportXml("./exportPens.xml", "Ручки");
