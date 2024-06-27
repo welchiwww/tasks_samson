@@ -21,22 +21,20 @@ function mb_strrev(string $string): string
 function convertString(string $a, string $b): string
 {
     $count = mb_substr_count($a, $b);
-    $result = '';
     if ($count >= 2) {
         $first_entry = mb_strpos($a, $b);
         $second_entry = mb_strpos($a, $b, $first_entry + mb_strlen($b));
         $reversed_second = mb_strrev($b);
         $a = mb_substr($a, 0, $second_entry) . $reversed_second . mb_substr($a, $second_entry + mb_strlen($b));
-        $result = $a;
     }
     return $a;
 }
 
-/*
+
 $a = 'абвcbd cbd абв вда вба дад';
-$b = convertString('one two three', 'four'); 
+$b = convertString('one two three four four', 'four'); 
 print_r($b);
-*/
+
 
 /*
 Реализовать функцию mySortForKey($a, $b). 
